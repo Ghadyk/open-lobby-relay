@@ -9,7 +9,7 @@ exit at startup with a clear message.
 |---|---|---|---|
 | `PORT` | `8080` | — | HTTP API port |
 | `PUBLIC_HOST` | *(empty)* | — | Address advertised to clients. Set to your VPS IP or domain. When empty, the server uses the request `Host` header. |
-| `TRUST_PROXY` | `false` | `true`/`false` | Trust `X-Forwarded-For`. Enable **only** behind a reverse proxy you control. |
+| `TRUST_PROXY` | `false` | `true`/`false` | Trust `X-Forwarded-For`. Enable **only** behind a reverse proxy you control. Join authorization compares this client IP with the relay's own TCP source, so never proxy or load-balance the relay ports. |
 
 ## Relay ports
 

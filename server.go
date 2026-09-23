@@ -44,6 +44,8 @@ type Server struct {
 	joinAuth map[string]map[string]time.Time
 
 	bans *banStore
+
+	xffWarnOnce sync.Once
 }
 
 type ipLimiterEntry struct {
@@ -248,12 +250,22 @@ func (s *Server) periodicCleanup() {
 // --- Helpers ---
 
 func (s *Server) extractIP(r *http.Request) string {
+	xff := r.Header.Get("X-Forwarded-For")
 	if s.cfg.TrustProxy {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if xff != "" {
 			// Rightmost entry: the value a single trusted proxy appended.
 			parts := strings.Split(xff, ",")
 			return strings.TrimSpace(parts[len(parts)-1])
 		}
+	} else if xff != "" {
+		// A proxy is forwarding the client address but we were told not to
+		// trust it, so every request looks like the proxy: per-IP rate limits
+		// and join authorization will be keyed on the wrong address.
+		s.xffWarnOnce.Do(func() {
+			log.Printf("Warning: received X-Forwarded-For but TRUST_PROXY is false; " +
+				"if the API is behind a reverse proxy, set TRUST_PROXY=true, or join " +
+				"authorization and rate limits will use the proxy's IP")
+		})
 	}
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
