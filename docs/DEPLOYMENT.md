@@ -6,7 +6,7 @@ enough for a community-sized lobby.
 ## Requirements
 
 - A host with a **public IP** (or a hostname pointing at one).
-- Docker + Docker Compose (recommended), or Go 1.21+ to build from source.
+- Docker + Docker Compose (recommended), or Go 1.27+ to build from source.
 - Open TCP ports: the API port and the relay port range.
 - Optional: a domain name and a reverse proxy for TLS.
 

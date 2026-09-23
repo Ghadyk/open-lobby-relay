@@ -119,7 +119,7 @@ go run ./docs/example join <room-id>
 - A host with a public IP (a small VPS is plenty).
 - One open TCP port for the API (`8080`) and a range for relays. Each relay uses **two**
   ports, so a 100-port range supports ~50 concurrent games.
-- Go 1.25+ to build from source.
+- Go 1.27+ to build from source.
 
 ## License
 

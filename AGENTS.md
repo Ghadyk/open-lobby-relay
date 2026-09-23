@@ -48,15 +48,17 @@ host's own game server. The relay is protocol-agnostic and never dials a peer.
 ## Build & test
 
 ```bash
-GOTOOLCHAIN=local go build -o dist/open-lobby-relay .
-GOTOOLCHAIN=local go test -v -count=1 ./...
-GOTOOLCHAIN=local go vet ./...
+go build -o dist/open-lobby-relay .
+go test -v -count=1 ./...
+go vet ./...
 gofmt -l .
 golangci-lint run
 gosec ./...
 ```
 
-Use `GOTOOLCHAIN=local` (the local toolchain may be newer than `go.mod`'s `go` directive).
+`go.mod` pins the language/toolchain (`go 1.27.0`); Go downloads the matching toolchain
+automatically when your local one is older. Set `GOTOOLCHAIN=local` only if your installed Go
+is at least 1.27.
 
 ## Environment variables
 

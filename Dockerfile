@@ -1,10 +1,10 @@
-FROM golang:1.25-alpine AS builder
+FROM golang:1.27-alpine AS builder
 WORKDIR /app
 COPY go.mod go.sum ./
 COPY *.go ./
 RUN CGO_ENABLED=0 go build -o open-lobby-relay .
 
-FROM alpine:3.22
+FROM alpine:3.24
 RUN apk --no-cache add ca-certificates wget
 RUN adduser -D -u 1000 relay
 WORKDIR /app
