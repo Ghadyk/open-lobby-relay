@@ -26,6 +26,7 @@ type Config struct {
 	RelayIdleTimeout time.Duration
 	RelayMaxBytes    int64
 	RelayConnRPM     int
+	RelayConnBurst   int
 
 	TrustProxy         bool
 	AllowPrivateHostIP bool
@@ -67,6 +68,7 @@ func LoadConfig() Config {
 	cfg.RelayIdleTimeout = time.Duration(envInt("RELAY_IDLE_TIMEOUT_SECONDS", 300, 5, 86400)) * time.Second
 	cfg.RelayMaxBytes = int64(envInt("RELAY_MAX_BYTES", 1<<30, 0, 1<<50))
 	cfg.RelayConnRPM = envInt("RELAY_CONN_RPM", 120, 0, 1000000)
+	cfg.RelayConnBurst = envInt("RELAY_CONN_BURST", 30, 1, 100000)
 
 	cfg.TrustProxy = envBool("TRUST_PROXY", false)
 	cfg.AllowPrivateHostIP = envBool("ALLOW_PRIVATE_HOST_IP", false)

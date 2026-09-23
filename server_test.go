@@ -26,6 +26,7 @@ func newTestServer(t *testing.T) *Server {
 		RelayIdleTimeout:   300 * time.Second,
 		RelayMaxBytes:      1 << 30,
 		RelayConnRPM:       0,
+		RelayConnBurst:     30,
 		AllowPrivateHostIP: true,
 		RateLimitRPM:       100000,
 		RateLimitBurst:     1000,
@@ -149,6 +150,7 @@ func TestCreateRoomValidation(t *testing.T) {
 		{"name": "x", "max_players": 999},
 		{"name": "x", "max_players": 4, "mode": strings.Repeat("a", 51)},
 		{"name": "x", "max_players": 4, "password": strings.Repeat("a", 73)},
+		{"name": "x", "max_players": 4, "has_password": true},
 	}
 	for i, body := range cases {
 		w := doRequest(t, mux, "POST", "/rooms", body, "")
@@ -730,5 +732,55 @@ func TestShutdownWithActiveRelay(t *testing.T) {
 	case <-done:
 	case <-time.After(10 * time.Second):
 		t.Fatal("closeAllRelays hung with an active session")
+	}
+}
+
+func TestVerifyRejectsBannedIP(t *testing.T) {
+	s := newTestServer(t)
+	mux := s.routes()
+	roomID, _ := createRoom(t, mux, "Banned")
+	s.bans.ban("1.2.3.4", time.Time{}) // doRequest uses RemoteAddr 1.2.3.4
+
+	w := doRequest(t, mux, "POST", "/rooms/"+roomID+"/verify", map[string]string{"password": ""}, "")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for banned IP, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestJoinAuthClearedOnDelete(t *testing.T) {
+	s := newTestServer(t)
+	s.cfg.RequireJoinAuth = true
+	mux := s.routes()
+	roomID, secret := createRoom(t, mux, "Auth")
+
+	if w := doRequest(t, mux, "POST", "/rooms/"+roomID+"/verify", map[string]string{"password": ""}, ""); w.Code != http.StatusOK {
+		t.Fatalf("verify failed: %d", w.Code)
+	}
+	if !s.isJoinAuthorized(roomID, "1.2.3.4") {
+		t.Fatal("expected IP to be authorized")
+	}
+	if w := doRequest(t, mux, "DELETE", "/rooms/"+roomID, nil, secret); w.Code != http.StatusOK {
+		t.Fatalf("delete failed: %d", w.Code)
+	}
+	if s.isJoinAuthorized(roomID, "1.2.3.4") {
+		t.Fatal("expected join auth to be cleared on delete")
+	}
+}
+
+func TestBackgroundLoopsStop(t *testing.T) {
+	s := newTestServer(t)
+	d1 := make(chan struct{})
+	d2 := make(chan struct{})
+	go func() { s.cleanupLoop(); close(d1) }()
+	go func() { s.periodicCleanup(); close(d2) }()
+
+	s.stopOnce.Do(func() { close(s.stopCh) })
+
+	for i, d := range []chan struct{}{d1, d2} {
+		select {
+		case <-d:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("background loop %d did not stop", i)
+		}
 	}
 }

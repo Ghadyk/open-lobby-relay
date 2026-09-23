@@ -26,7 +26,22 @@ const (
 // the host port before it must prove possession of the room secret.
 const hostAuthTimeout = 3 * time.Second
 
+// dataConnWait is how long a joiner waits for the host to open a data
+// connection. dataConnTTL is how long an unclaimed data connection may sit in
+// the queue before it is considered stale (its joiner is gone) and closed, so
+// it is never handed to a later joiner.
+const (
+	dataConnWait = 15 * time.Second
+	dataConnTTL  = 10 * time.Second
+)
+
 var errByteQuota = errors.New("relay byte quota exceeded")
+
+// pendingData is a host data connection waiting to be paired with a joiner.
+type pendingData struct {
+	conn net.Conn
+	at   time.Time
+}
 
 // Relay is a reverse-tunnel TCP relay for one room:
 //   - the host port accepts the host's tunnel and data connections;
@@ -39,7 +54,7 @@ type Relay struct {
 	JoinerListener net.Listener
 	HostPort       int
 	JoinerPort     int
-	dataConnCh     chan net.Conn
+	dataConnCh     chan pendingData
 	hostHandshakes chan struct{}
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
@@ -60,7 +75,7 @@ func (s *Server) startRelay(room *Room, relayHost string, hostLn, joinerLn net.L
 		JoinerListener: joinerLn,
 		HostPort:       hostLn.Addr().(*net.TCPAddr).Port,
 		JoinerPort:     joinerLn.Addr().(*net.TCPAddr).Port,
-		dataConnCh:     make(chan net.Conn, s.cfg.MaxConnsPerRelay),
+		dataConnCh:     make(chan pendingData, s.cfg.MaxConnsPerRelay),
 		hostHandshakes: make(chan struct{}, s.cfg.MaxConnsPerRelay+1),
 		cancel:         cancel,
 	}
@@ -150,7 +165,7 @@ func (s *Server) handleHostConn(ctx context.Context, relay *Relay, conn net.Conn
 		go s.watchHostTunnel(relay, conn)
 	case roleHostData:
 		select {
-		case relay.dataConnCh <- conn:
+		case relay.dataConnCh <- pendingData{conn: conn, at: time.Now()}:
 		default:
 			log.Printf("Relay %s: data connection with no waiting joiner, closing", relay.RoomID)
 			_ = conn.Close()
@@ -239,15 +254,31 @@ func (s *Server) handleJoiner(ctx context.Context, relay *Relay, conn net.Conn) 
 	atomic.AddInt32(&relay.connCount, 1)
 	defer atomic.AddInt32(&relay.connCount, -1)
 
-	select {
-	case dataConn := <-relay.dataConnCh:
-		s.bridge(ctx, relay, conn, dataConn)
-	case <-time.After(15 * time.Second):
-		log.Printf("Relay %s: host did not open a data connection in time", relay.RoomID)
-		_ = conn.Close()
-	case <-ctx.Done():
-		_ = conn.Close()
+	deadline := time.Now().Add(dataConnWait)
+	var dataConn net.Conn
+	for dataConn == nil {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			log.Printf("Relay %s: host did not open a data connection in time", relay.RoomID)
+			_ = conn.Close()
+			return
+		}
+		select {
+		case pending := <-relay.dataConnCh:
+			if time.Since(pending.at) > dataConnTTL {
+				// Its joiner already gave up; don't hand a stale game
+				// connection to the next one.
+				_ = pending.conn.Close()
+				continue
+			}
+			dataConn = pending.conn
+		case <-time.After(remaining):
+		case <-ctx.Done():
+			_ = conn.Close()
+			return
+		}
 	}
+	s.bridge(ctx, relay, conn, dataConn)
 }
 
 // bridge copies bytes both ways until either side closes, the relay is

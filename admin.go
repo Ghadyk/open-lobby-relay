@@ -62,6 +62,7 @@ func (s *Server) adminDeleteRoom(w http.ResponseWriter, r *http.Request, roomID 
 		http.NotFound(w, r)
 		return
 	}
+	s.clearJoinAuth(roomID)
 	w.WriteHeader(http.StatusOK)
 }
 

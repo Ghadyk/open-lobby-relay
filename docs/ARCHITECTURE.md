@@ -165,5 +165,6 @@ waits for the relay goroutines to finish.
 | Idle session timeout | `RELAY_IDLE_TIMEOUT_SECONDS` | 300 |
 | Bytes per session | `RELAY_MAX_BYTES` | 1 GiB |
 | Joiner connections per IP | `RELAY_CONN_RPM` | 120/min |
+| Joiner connection burst | `RELAY_CONN_BURST` | 30 |
 | API requests per IP | `RATE_LIMIT_RPM` | 200/min |
 | Concurrent bcrypt ops | *(built in)* | `NumCPU` |

@@ -46,6 +46,8 @@ type Server struct {
 	bans *banStore
 
 	xffWarnOnce sync.Once
+	stopCh      chan struct{}
+	stopOnce    sync.Once
 }
 
 type ipLimiterEntry struct {
@@ -68,6 +70,7 @@ func NewServer(cfg Config) *Server {
 		bcryptSem:         make(chan struct{}, n),
 		joinAuth:          make(map[string]map[string]time.Time),
 		bans:              newBanStore(),
+		stopCh:            make(chan struct{}),
 	}
 }
 
@@ -97,6 +100,13 @@ func (s *Server) recordJoinAuth(roomID, ip string) {
 		s.joinAuth[roomID] = m
 	}
 	m[ip] = time.Now().Add(s.cfg.JoinAuthTTL)
+	s.joinMu.Unlock()
+}
+
+// clearJoinAuth drops all join authorizations for a room.
+func (s *Server) clearJoinAuth(roomID string) {
+	s.joinMu.Lock()
+	delete(s.joinAuth, roomID)
 	s.joinMu.Unlock()
 }
 
@@ -131,7 +141,7 @@ func (s *Server) allowRelayConn(ip string) bool {
 	if !ok {
 		rps := float64(s.cfg.RelayConnRPM) / 60.0
 		entry = &ipLimiterEntry{
-			limiter:  rate.NewLimiter(rate.Limit(rps), s.cfg.RateLimitBurst),
+			limiter:  rate.NewLimiter(rate.Limit(rps), s.cfg.RelayConnBurst),
 			lastSeen: time.Now(),
 		}
 		s.relayConnLimiters[ip] = entry
@@ -176,6 +186,7 @@ func (s *Server) Shutdown(srv *http.Server) {
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("HTTP shutdown error: %v", err)
 	}
+	s.stopOnce.Do(func() { close(s.stopCh) })
 	s.closeAllRelays()
 	log.Println("Server stopped")
 }
@@ -195,8 +206,14 @@ func (s *Server) routes() http.Handler {
 // --- Background loops ---
 
 func (s *Server) cleanupLoop() {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
 	for {
-		time.Sleep(10 * time.Second)
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+		}
 		s.mu.Lock()
 		now := time.Now()
 		for id, room := range s.rooms {
@@ -204,6 +221,7 @@ func (s *Server) cleanupLoop() {
 				log.Printf("Cleaning up inactive room: %q (%s)", room.Name, id)
 				delete(s.rooms, id)
 				s.closeRelayLocked(id)
+				s.clearJoinAuth(id)
 			}
 		}
 		s.mu.Unlock()
@@ -211,8 +229,14 @@ func (s *Server) cleanupLoop() {
 }
 
 func (s *Server) periodicCleanup() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
 	for {
-		time.Sleep(5 * time.Minute)
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+		}
 		cutoff := time.Now().Add(-10 * time.Minute)
 
 		s.ipMu.Lock()
@@ -497,7 +521,8 @@ func (s *Server) handleRooms(w http.ResponseWriter, r *http.Request) {
 			room.PasswordHash = string(hash)
 			room.HasPassword = true
 		} else if input.HasPassword {
-			room.HasPassword = false
+			writeJSONError(w, http.StatusBadRequest, "password required when has_password is true")
+			return
 		}
 
 		s.mu.Lock()
@@ -556,6 +581,10 @@ func (s *Server) handleVerifyPassword(w http.ResponseWriter, r *http.Request, ro
 	}
 
 	ip := s.extractIP(r)
+	if s.bans.isBanned(ip) {
+		writeJSONError(w, http.StatusForbidden, "forbidden")
+		return
+	}
 
 	s.mu.RLock()
 	room, exists := s.rooms[roomID]
@@ -609,6 +638,7 @@ func (s *Server) handleDeleteRoom(w http.ResponseWriter, r *http.Request, roomID
 	delete(s.rooms, roomID)
 	s.closeRelayLocked(roomID)
 	s.mu.Unlock()
+	s.clearJoinAuth(roomID)
 
 	w.WriteHeader(http.StatusOK)
 }

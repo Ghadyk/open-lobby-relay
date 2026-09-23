@@ -32,6 +32,7 @@ otherwise.
 | `RELAY_IDLE_TIMEOUT_SECONDS` | `300` | 5-86400 | Close a bridged session after this much inactivity |
 | `RELAY_MAX_BYTES` | `1073741824` | 0-… | Per-session byte cap. `0` = unlimited. **Set a value on public instances.** |
 | `RELAY_CONN_RPM` | `120` | 0-1000000 | Per-IP joiner connections per minute. `0` = unlimited. Rate-based, so NAT-shared players aren't penalised. |
+| `RELAY_CONN_BURST` | `30` | 1-100000 | Joiner connection burst per IP (token-bucket capacity) |
 | `RATE_LIMIT_RPM` | `200` | 0-1000000 | API requests per minute per IP. `0` disables API rate limiting. |
 | `RATE_LIMIT_BURST` | `30` | 1-100000 | API token-bucket burst |
 
@@ -78,6 +79,7 @@ MAX_CONNS_PER_RELAY=8
 RELAY_IDLE_TIMEOUT_SECONDS=300
 RELAY_MAX_BYTES=536870912
 RELAY_CONN_RPM=120
+RELAY_CONN_BURST=30
 RATE_LIMIT_RPM=200
 RATE_LIMIT_BURST=30
 
