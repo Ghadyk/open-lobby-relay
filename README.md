@@ -29,6 +29,28 @@ protocol.
 - **Self-hosted.** Run your own instance; there is no central service. All state is in
   memory and a restart simply clears the lobby.
 
+## How this compares
+
+Plenty of open-source projects solve *part* of this problem. None ship the whole thing in one
+lightweight, self-hosted binary:
+
+| Project | Reverse-tunnel relay | Room discovery | Protocol-agnostic | Notes |
+|---|---|---|---|---|
+| [frp](https://github.com/fatedier/frp) | yes | no | yes | Mature general-purpose tunneling; configured per-service, no lobby |
+| [rathole](https://github.com/rapiz1/rathole) | yes | no | yes | Fast Rust reverse proxy; config-file driven |
+| [bore](https://github.com/ekzhang/bore) | yes | no | TCP only | Minimal tunneling; no discovery |
+| [GameRelay](https://github.com/NexRelay/GameRelay) | yes (TCP+UDP) | no | yes | Closest match: a self-hosted relay for home game servers, but players must already know the address |
+| [Nakama](https://github.com/heroiclabs/nakama) | relays game *messages* | yes | no | Full game backend; needs its SDK, a database, and you relay in-game state rather than expose your own server socket |
+| [Open Match](https://github.com/googleforgames/open-match) | no | yes | no | Matchmaking only |
+| [Tailscale](https://github.com/tailscale/tailscale) / [ZeroTier](https://github.com/zerotier/ZeroTierOne) | mesh VPN | no | yes | Great for private meshes, not a public browser |
+
+The relay half is commodity — `frp`, `rathole`, and `bore` do it well, and `GameRelay` does it
+specifically for game servers. The discovery half is commodity too — `Nakama` and `Open Match`
+cover it. What is uncommon is the **combination**: browse a public room list, click join, and
+have the connection automatically traverse NAT through a bundled relay, with **no client library
+for joiners** and no database. If you only need one half, use one of the projects above; if you
+want both wired together for a small game or community, this is that.
+
 ## Features
 
 - Room discovery (register, list, browse), heartbeats, optional passwords.
@@ -97,7 +119,7 @@ go run ./docs/example join <room-id>
 - A host with a public IP (a small VPS is plenty).
 - One open TCP port for the API (`8080`) and a range for relays. Each relay uses **two**
   ports, so a 100-port range supports ~50 concurrent games.
-- Go 1.21+ to build from source.
+- Go 1.25+ to build from source.
 
 ## License
 
