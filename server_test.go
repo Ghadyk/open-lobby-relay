@@ -407,6 +407,91 @@ func TestHostTunnelReconnect(t *testing.T) {
 	joinOnce()
 }
 
+// roomUseRelay returns the relay advertisement fields for a room.
+func roomUseRelay(t *testing.T, mux http.Handler, roomID string) (useRelay bool, host string, port int) {
+	t.Helper()
+	w := doRequest(t, mux, "GET", "/rooms", nil, "")
+	var list []map[string]interface{}
+	_ = json.NewDecoder(w.Body).Decode(&list)
+	for _, r := range list {
+		if r["id"] != roomID {
+			continue
+		}
+		useRelay, _ = r["use_relay"].(bool)
+		host, _ = r["relay_host"].(string)
+		if p, ok := r["relay_port"].(float64); ok {
+			port = int(p)
+		}
+		return useRelay, host, port
+	}
+	t.Fatalf("room %s not found in listing", roomID)
+	return false, "", 0
+}
+
+func waitUseRelay(t *testing.T, mux http.Handler, roomID string, want bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if use, _, _ := roomUseRelay(t, mux, roomID); use == want {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	use, host, port := roomUseRelay(t, mux, roomID)
+	t.Fatalf("use_relay = %v (host=%q port=%d), want %v", use, host, port, want)
+}
+
+// TestHostTunnelLossUnadvertises checks that dropping the host tunnel removes
+// the relay from the room listing and that a reconnect re-advertises it.
+func TestHostTunnelLossUnadvertises(t *testing.T) {
+	s := newTestServer(t)
+	mux := s.routes()
+	roomID, secret := createRoom(t, mux, "Liveness")
+	hostAddr, _ := relayAddrs(t, mux, roomID, secret)
+
+	tunnel, err := net.DialTimeout("tcp", hostAddr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("tunnel dial: %v", err)
+	}
+	writeHandshake(t, tunnel, 0x01, secret)
+	waitUseRelay(t, mux, roomID, true)
+
+	_ = tunnel.Close()
+	waitUseRelay(t, mux, roomID, false)
+
+	t2, err := net.DialTimeout("tcp", hostAddr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("reconnect dial: %v", err)
+	}
+	defer func() { _ = t2.Close() }()
+	writeHandshake(t, t2, 0x01, secret)
+	waitUseRelay(t, mux, roomID, true)
+}
+
+// TestCloseAllRelaysUnadvertises checks that the kill switch clears the relay
+// advertisement from every room.
+func TestCloseAllRelaysUnadvertises(t *testing.T) {
+	s := newTestServer(t)
+	mux := s.routes()
+	roomID, secret := createRoom(t, mux, "Kill")
+	hostAddr, _ := relayAddrs(t, mux, roomID, secret)
+
+	tunnel, err := net.DialTimeout("tcp", hostAddr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("tunnel dial: %v", err)
+	}
+	defer func() { _ = tunnel.Close() }()
+	writeHandshake(t, tunnel, 0x01, secret)
+	waitUseRelay(t, mux, roomID, true)
+
+	s.closeAllRelays()
+
+	use, host, port := roomUseRelay(t, mux, roomID)
+	if use || host != "" || port != 0 {
+		t.Fatalf("after close-all: use_relay=%v host=%q port=%d, want cleared", use, host, port)
+	}
+}
+
 func TestRelayRejectsBadHostSecret(t *testing.T) {
 	s := newTestServer(t)
 	mux := s.routes()

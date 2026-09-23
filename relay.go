@@ -129,7 +129,9 @@ func (s *Server) handleHostConn(ctx context.Context, relay *Relay, conn net.Conn
 		relay.mu.Unlock()
 		log.Printf("Relay %s: host tunnel established from %s", relay.RoomID, remoteIP(conn))
 		s.markRelayReady(relay)
-		// conn stays open: it is the host's control connection.
+		// conn stays open: it is the host's control connection. Watch it so a
+		// dropped tunnel unadvertises the relay until the host reconnects.
+		go s.watchHostTunnel(relay, conn)
 	case roleHostData:
 		select {
 		case relay.dataConnCh <- conn:
@@ -324,6 +326,52 @@ func (s *Server) markRelayReady(relay *Relay) {
 	}
 }
 
+// watchHostTunnel blocks reading the host's control connection. The host never
+// writes on the tunnel, so a read returning an error means the tunnel is gone.
+// The relay then stops advertising itself until the host reconnects, so joiners
+// never see a relay that cannot serve them.
+func (s *Server) watchHostTunnel(relay *Relay, conn net.Conn) {
+	buf := make([]byte, 1)
+	for {
+		if _, err := conn.Read(buf); err != nil {
+			break
+		}
+	}
+
+	relay.mu.Lock()
+	stillCurrent := relay.hostTunnel == conn
+	if stillCurrent {
+		relay.hostTunnel = nil
+	}
+	relay.mu.Unlock()
+	_ = conn.Close()
+
+	if stillCurrent {
+		log.Printf("Relay %s: host tunnel lost; unadvertising until the host reconnects", relay.RoomID)
+		s.clearAdvertisement(relay.RoomID, relay)
+	}
+}
+
+// clearRoomRelayLocked resets a room's relay advertisement. Caller must hold s.mu.
+func (s *Server) clearRoomRelayLocked(roomID string) {
+	if room, ok := s.rooms[roomID]; ok {
+		room.UseRelay = false
+		room.RelayHost = ""
+		room.RelayPort = 0
+	}
+}
+
+// clearAdvertisement unadvertises a room's relay if relay is still the room's
+// current relay. Safe to call without holding s.mu.
+func (s *Server) clearAdvertisement(roomID string, relay *Relay) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r, ok := s.relays[roomID]; !ok || r != relay {
+		return
+	}
+	s.clearRoomRelayLocked(roomID)
+}
+
 func (s *Server) cleanupRelay(relay *Relay) {
 	s.mu.Lock()
 	if r, exists := s.relays[relay.RoomID]; exists && r == relay {
@@ -347,11 +395,7 @@ func (s *Server) closeRelayLocked(roomID string) {
 	delete(s.relays, roomID)
 	delete(s.usedPorts, relay.HostPort)
 	delete(s.usedPorts, relay.JoinerPort)
-	if room, ok := s.rooms[roomID]; ok {
-		room.UseRelay = false
-		room.RelayHost = ""
-		room.RelayPort = 0
-	}
+	s.clearRoomRelayLocked(roomID)
 	_ = relay.HostListener.Close()
 	_ = relay.JoinerListener.Close()
 	relay.cancel()
@@ -364,6 +408,7 @@ func (s *Server) closeAllRelays() {
 		delete(s.relays, relay.RoomID)
 		delete(s.usedPorts, relay.HostPort)
 		delete(s.usedPorts, relay.JoinerPort)
+		s.clearRoomRelayLocked(relay.RoomID)
 		_ = relay.HostListener.Close()
 		_ = relay.JoinerListener.Close()
 		relay.cancel()

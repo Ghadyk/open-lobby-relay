@@ -65,6 +65,10 @@ Key points:
 - A room is only advertised **with relay info once the host tunnel is connected**, so a
   listed relay is always usable. Before that, `use_relay` is false and `relay_host`/`relay_port`
   are empty.
+- If the host tunnel drops, the relay is **unadvertised again** until the host reconnects with a
+  new `0x01` (the listeners stay up, so the same host port is reused). This means a dead tunnel
+  is never listed as joinable. `POST /admin/relays/close-all` clears every room's advertisement
+  the same way.
 - `DELETE /rooms/{id}`, an admin delete, and heartbeat expiry all funnel through the same
   cleanup: close both listeners, cancel active bridges, free both ports.
 

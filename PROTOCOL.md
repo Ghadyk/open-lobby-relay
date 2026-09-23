@@ -59,7 +59,8 @@ Store `id` and `secret`. The `secret` is returned only here.
 
 Returns an array of rooms. `secret`, `password`, and the host's address are never included.
 A room only contains `relay_host` and `relay_port` once its host tunnel is connected, so a
-listed relay is always usable.
+listed relay is always usable. If the host's tunnel drops, those fields are cleared again until
+it reconnects.
 
 ```json
 [

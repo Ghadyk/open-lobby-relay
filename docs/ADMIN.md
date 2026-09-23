@@ -73,8 +73,9 @@ Cancels every active session and closes every relay. Use in an emergency.
 curl -s -X POST -H "Authorization: Bearer $ADMIN_TOKEN" "$LOBBY/admin/relays/close-all"
 ```
 
-Rooms remain registered and will re-establish relays if the hosts keep running; delete the
-rooms too if you want them gone.
+Rooms remain registered, but every room's relay advertisement is cleared, so no joiner sees a
+stale relay. A host must call `POST /relay` again and reconnect its tunnel to be listed with a
+relay. Delete the rooms too if you want them gone.
 
 ### List bans
 
