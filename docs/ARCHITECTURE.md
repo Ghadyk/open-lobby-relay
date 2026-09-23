@@ -138,7 +138,9 @@ HTTP IP and relay TCP IP to match (normally true; see
 
 Each relay runs two accept loops (host, joiner) and one goroutine per connection. A bridge is
 two `io.Copy` goroutines plus a small watchdog that closes both sockets when the relay is
-cancelled, so shutdown never hangs on an in-flight game.
+cancelled, so shutdown never hangs on an in-flight game. Unauthenticated connections to the
+host port are capped per relay (`MAX_CONNS_PER_RELAY + 1`) and must present the secret within a
+few seconds, so a flood of silent host connections cannot spawn unbounded goroutines.
 
 ## Shutdown
 

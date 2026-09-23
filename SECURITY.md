@@ -17,9 +17,10 @@ to run it safely.
 - **Room passwords are enforced at the relay.** With `REQUIRE_JOIN_AUTH=true` (default) a
   joiner's IP must have passed `POST /rooms/{id}/verify` recently, so a client cannot skip
   the password check and connect straight to the joiner port.
-- **Bounded resources.** Concurrency (rooms, relays, connections), request bodies, per-IP
-  API rate, per-IP joiner connection rate, per-session bytes, idle time, and bcrypt work are
-  all capped.
+- **Bounded resources.** Concurrency (rooms, relays, connections, pending host handshakes),
+  request bodies, per-IP API rate, per-IP joiner connection rate, per-session bytes, idle time,
+  and bcrypt work are all capped. Unauthenticated host connections must present the secret
+  within a few seconds and are limited per relay.
 
 ## Not preventable (know the trade-off)
 

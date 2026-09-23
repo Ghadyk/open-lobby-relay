@@ -22,6 +22,10 @@ const (
 	hostSecretLen       = 64   // hex-encoded 32-byte room secret
 )
 
+// hostAuthTimeout bounds how long an unauthenticated host connection may sit on
+// the host port before it must prove possession of the room secret.
+const hostAuthTimeout = 3 * time.Second
+
 var errByteQuota = errors.New("relay byte quota exceeded")
 
 // Relay is a reverse-tunnel TCP relay for one room:
@@ -36,6 +40,7 @@ type Relay struct {
 	HostPort       int
 	JoinerPort     int
 	dataConnCh     chan net.Conn
+	hostHandshakes chan struct{}
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
 	connCount      int32
@@ -56,6 +61,7 @@ func (s *Server) startRelay(room *Room, relayHost string, hostLn, joinerLn net.L
 		HostPort:       hostLn.Addr().(*net.TCPAddr).Port,
 		JoinerPort:     joinerLn.Addr().(*net.TCPAddr).Port,
 		dataConnCh:     make(chan net.Conn, s.cfg.MaxConnsPerRelay),
+		hostHandshakes: make(chan struct{}, s.cfg.MaxConnsPerRelay+1),
 		cancel:         cancel,
 	}
 
@@ -103,6 +109,15 @@ func (s *Server) acceptHostLoop(ctx context.Context, relay *Relay) {
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
+		// Bound unauthenticated host connections so a flood of silent
+		// connections to the host port cannot spawn unbounded goroutines. The
+		// slot is released once the connection authenticates or is dropped.
+		select {
+		case relay.hostHandshakes <- struct{}{}:
+		default:
+			_ = conn.Close()
+			continue
+		}
 		relay.wg.Add(1)
 		go func(c net.Conn) {
 			defer relay.wg.Done()
@@ -112,7 +127,8 @@ func (s *Server) acceptHostLoop(ctx context.Context, relay *Relay) {
 }
 
 func (s *Server) handleHostConn(ctx context.Context, relay *Relay, conn net.Conn) {
-	role, ok := readHostRole(conn, relay.Secret, 5*time.Second)
+	role, ok := readHostRole(conn, relay.Secret, hostAuthTimeout)
+	<-relay.hostHandshakes // authenticated or dropped; free the handshake slot
 	if !ok {
 		log.Printf("Relay %s: rejecting unauthenticated host connection from %s", relay.RoomID, remoteIP(conn))
 		_ = conn.Close()

@@ -492,6 +492,44 @@ func TestCloseAllRelaysUnadvertises(t *testing.T) {
 	}
 }
 
+// TestHostHandshakeCap checks that more unauthenticated host connections than
+// the per-relay cap allows are dropped instead of piling up.
+func TestHostHandshakeCap(t *testing.T) {
+	s := newTestServer(t)
+	s.cfg.MaxConnsPerRelay = 2 // cap = 3 in-flight host handshakes
+	mux := s.routes()
+	roomID, secret := createRoom(t, mux, "Cap")
+	hostAddr, _ := relayAddrs(t, mux, roomID, secret)
+
+	slots := s.cfg.MaxConnsPerRelay + 1
+	held := make([]net.Conn, 0, slots)
+	defer func() {
+		for _, c := range held {
+			_ = c.Close()
+		}
+	}()
+	// Open connections that never send the handshake, occupying every slot.
+	for i := 0; i < slots; i++ {
+		c, err := net.DialTimeout("tcp", hostAddr, 5*time.Second)
+		if err != nil {
+			t.Fatalf("dial %d: %v", i, err)
+		}
+		held = append(held, c)
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	// The next one exceeds the cap and must be closed by the relay.
+	extra, err := net.DialTimeout("tcp", hostAddr, 5*time.Second)
+	if err != nil {
+		t.Fatalf("extra dial: %v", err)
+	}
+	defer func() { _ = extra.Close() }()
+	_ = extra.SetReadDeadline(time.Now().Add(1500 * time.Millisecond))
+	if _, err := extra.Read(make([]byte, 1)); err == nil {
+		t.Fatal("expected extra host connection to be dropped")
+	}
+}
+
 func TestRelayRejectsBadHostSecret(t *testing.T) {
 	s := newTestServer(t)
 	mux := s.routes()
