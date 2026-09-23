@@ -1,0 +1,7 @@
+.git/
+dist/
+*.md
+LICENSE
+.github/
+docs/
+.env

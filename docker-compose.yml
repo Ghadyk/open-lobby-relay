@@ -1,0 +1,10 @@
+services:
+  relay:
+    build: .
+    ports:
+      - "8080:8080"
+      - "10000-10099:10000-10099"
+    env_file:
+      - .env
+    restart: unless-stopped
+    mem_limit: 256m
