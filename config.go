@@ -48,6 +48,9 @@ func LoadConfig() Config {
 
 	cfg.Port = envString("PORT", "8080")
 	cfg.PublicHost = os.Getenv("PUBLIC_HOST")
+	if cfg.PublicHost == "" {
+		log.Printf("Note: PUBLIC_HOST is not set; the advertised relay host falls back to each request's Host header, which is wrong behind a proxy. Set it in production.")
+	}
 
 	cfg.RelayPortMin = envInt("RELAY_PORT_MIN", 10000, 1024, 65535)
 	cfg.RelayPortMax = envInt("RELAY_PORT_MAX", 10099, 1024, 65535)
@@ -119,6 +122,6 @@ func envBool(key string, def bool) bool {
 		return false
 	default:
 		log.Fatalf("Invalid %s (must be true or false)", key)
-		return def
 	}
+	return def
 }

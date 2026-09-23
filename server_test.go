@@ -121,6 +121,17 @@ func TestHealth(t *testing.T) {
 	}
 }
 
+func TestResponsesAreNotCached(t *testing.T) {
+	s := newTestServer(t)
+	mux := s.routes()
+	for _, path := range []string{"/health", "/rooms", "/metrics"} {
+		w := doRequest(t, mux, "GET", path, nil, "")
+		if got := w.Header().Get("Cache-Control"); got != "no-store" {
+			t.Fatalf("%s: expected Cache-Control no-store, got %q", path, got)
+		}
+	}
+}
+
 func TestCreateRoom(t *testing.T) {
 	s := newTestServer(t)
 	mux := s.routes()

@@ -316,13 +316,14 @@ func (s *Server) resolveRelayHost(r *http.Request) string {
 		if err == nil && host != "" {
 			return host
 		}
-		return h
+		return strings.Trim(h, "[]")
 	}
 	return s.extractIP(r)
 }
 
 func writeJSON(w http.ResponseWriter, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		log.Printf("json encode error: %v", err)
 	}
@@ -330,6 +331,7 @@ func writeJSON(w http.ResponseWriter, v interface{}) {
 
 func writeJSONError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
 	if err := json.NewEncoder(w).Encode(map[string]string{"error": msg}); err != nil {
 		log.Printf("json encode error: %v", err)
@@ -338,6 +340,7 @@ func writeJSONError(w http.ResponseWriter, code int, msg string) {
 
 func writeJSONStatus(w http.ResponseWriter, code int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		log.Printf("json encode error: %v", err)
@@ -396,6 +399,7 @@ func (s *Server) adminMiddleware(next http.Handler) http.Handler {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok"}`))
 }
