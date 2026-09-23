@@ -105,7 +105,13 @@ func runJoin(server, roomID string) {
 		conn := mustDialAddr(net.JoinHostPort(r.RelayHost, strconv.Itoa(r.RelayPort)))
 		defer func() { _ = conn.Close() }()
 		fmt.Println("connected to relay; type a line and press enter (bytes are echoed)")
-		go func() { _, _ = io.Copy(conn, os.Stdin) }()
+		go func() {
+			_, _ = io.Copy(conn, os.Stdin)
+			// stdin closed (Ctrl-D or piped input): give a final response a
+			// moment to arrive, then end the session.
+			time.Sleep(500 * time.Millisecond)
+			_ = conn.Close()
+		}()
 		_, _ = io.Copy(os.Stdout, conn)
 		return
 	}
