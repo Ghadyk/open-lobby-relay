@@ -661,8 +661,8 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if payload.Mode != "" {
 		room.Mode = payload.Mode
 	}
-	w.WriteHeader(http.StatusOK)
 	s.mu.Unlock()
+	w.WriteHeader(http.StatusOK)
 }
 
 // allocatePortPair returns two free relay ports (host, joiner), or (0, 0).
@@ -709,8 +709,9 @@ func (s *Server) handleRelay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reserve a port pair under the lock (replacing any previous relay), but
+	// bind the listeners outside it so a slow bind never blocks the whole API.
 	s.mu.Lock()
-
 	room, exists := s.rooms[input.RoomID]
 	if !exists {
 		s.mu.Unlock()
@@ -722,44 +723,57 @@ func (s *Server) handleRelay(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		return
 	}
-
-	s.closeRelayLocked(input.RoomID)
-
 	if len(s.relays) >= s.cfg.MaxRelays {
 		s.mu.Unlock()
 		writeJSONError(w, http.StatusServiceUnavailable, "max relays reached")
 		return
 	}
-
+	s.closeRelayLocked(input.RoomID)
 	hostPort, joinerPort := s.allocatePortPair()
 	if hostPort == 0 {
 		s.mu.Unlock()
 		writeJSONError(w, http.StatusServiceUnavailable, "no ports available")
 		return
 	}
+	s.mu.Unlock()
 
 	hostLn, err := net.Listen("tcp", fmt.Sprintf(":%d", hostPort))
 	if err != nil {
-		delete(s.usedPorts, hostPort)
-		delete(s.usedPorts, joinerPort)
-		s.mu.Unlock()
+		s.releasePorts(hostPort, joinerPort)
 		writeJSONError(w, http.StatusInternalServerError, "failed to bind relay ports")
 		return
 	}
 	joinerLn, err := net.Listen("tcp", fmt.Sprintf(":%d", joinerPort))
 	if err != nil {
 		_ = hostLn.Close()
-		delete(s.usedPorts, hostPort)
-		delete(s.usedPorts, joinerPort)
-		s.mu.Unlock()
+		s.releasePorts(hostPort, joinerPort)
 		writeJSONError(w, http.StatusInternalServerError, "failed to bind relay ports")
 		return
 	}
 
 	relayHost := s.resolveRelayHost(r)
+
+	s.mu.Lock()
+	room, exists = s.rooms[input.RoomID]
+	if !exists || !validToken(token, room.Secret) {
+		s.mu.Unlock()
+		_ = hostLn.Close()
+		_ = joinerLn.Close()
+		s.releasePorts(hostPort, joinerPort)
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if len(s.relays) >= s.cfg.MaxRelays {
+		s.mu.Unlock()
+		_ = hostLn.Close()
+		_ = joinerLn.Close()
+		s.releasePorts(hostPort, joinerPort)
+		writeJSONError(w, http.StatusServiceUnavailable, "max relays reached")
+		return
+	}
+	s.closeRelayLocked(input.RoomID)
 	relay := s.startRelay(room, relayHost, hostLn, joinerLn)
 	s.relays[input.RoomID] = relay
-
 	s.mu.Unlock()
 
 	writeJSONStatus(w, http.StatusCreated, map[string]interface{}{
@@ -767,6 +781,15 @@ func (s *Server) handleRelay(w http.ResponseWriter, r *http.Request) {
 		"host_port":  hostPort,
 		"relay_port": joinerPort,
 	})
+}
+
+// releasePorts returns reserved relay ports to the pool.
+func (s *Server) releasePorts(ports ...int) {
+	s.mu.Lock()
+	for _, p := range ports {
+		delete(s.usedPorts, p)
+	}
+	s.mu.Unlock()
 }
 
 func validToken(token, secret string) bool {
